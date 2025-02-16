@@ -5,6 +5,10 @@ import aiohttp
 import tensorflow as tf
 import numpy as np
 from PIL import Image
+from flask import Flask, render_template, request, redirect, url_for
+from googletrans import Translator
+import punctuator
+import asyncio
 
 # Configuración del bot
 TOKEN = 'TU_TOKEN_AQUI'
@@ -13,6 +17,9 @@ intents.messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# Configuración de Flask
+app = Flask(__name__)
+
 # Carpeta donde se guardarán las imágenes
 IMAGE_FOLDER = 'images'
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
@@ -20,6 +27,9 @@ os.makedirs(IMAGE_FOLDER, exist_ok=True)
 # Rutas del modelo de IA
 MODEL_PATH = 'modelo/model.tflite'
 LABELS_PATH = 'modelo/labels.txt'
+
+translator = Translator()
+punctuator_model = punctuator.Punctuator('punctuator_model.pcl')
 
 def load_labels(labels_path):
     with open(labels_path, 'r') as f:
@@ -75,5 +85,35 @@ async def analizar_imagen(ctx):
     else:
         await ctx.send('No has adjuntado ninguna imagen.')
 
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/transcribir', methods=['POST'])
+def transcribir():
+    try:
+        texto = request.form['texto']
+        texto_puntuado = punctuator_model.punctuate(texto)
+        texto_traducido = translator.translate(texto_puntuado, dest='en').text
+        return render_template('index.html', transcripcion=texto_traducido)
+    except Exception as e:
+        return render_template('index.html', error=f'Error al procesar: {str(e)}')
+
+@app.route('/juego_secreto')
+def juego_secreto():
+    return "¡Has encontrado el botón secreto! 🎉"
+
+@app.route('/test')
+def test():
+    return "¡Prueba del sistema completada con éxito!"
+
+def run_flask():
+    app.run(debug=True, use_reloader=False)
+
+async def run_bot():
+    await bot.start(TOKEN)
+
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_bot())
+    run_flask()
