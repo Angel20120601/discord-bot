@@ -1,0 +1,79 @@
+import discord
+from discord.ext import commands
+import os
+import aiohttp
+import tensorflow as tf
+import numpy as np
+from PIL import Image
+
+# Configuración del bot
+TOKEN = 'TU_TOKEN_AQUI'
+intents = discord.Intents.default()
+intents.messages = True
+intents.message_content = True
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Carpeta donde se guardarán las imágenes
+IMAGE_FOLDER = 'images'
+os.makedirs(IMAGE_FOLDER, exist_ok=True)
+
+# Rutas del modelo de IA
+MODEL_PATH = 'modelo/model.tflite'
+LABELS_PATH = 'modelo/labels.txt'
+
+def load_labels(labels_path):
+    with open(labels_path, 'r') as f:
+        return [line.strip() for line in f.readlines()]
+
+def get_class(model_path, labels_path, image_path):
+    try:
+        interpreter = tf.lite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
+        
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+        
+        img = Image.open(image_path).convert('RGB').resize((224, 224))
+        img = np.array(img, dtype=np.float32) / 255.0
+        img = np.expand_dims(img, axis=0)
+        
+        interpreter.set_tensor(input_details[0]['index'], img)
+        interpreter.invoke()
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        
+        labels = load_labels(labels_path)
+        result_index = np.argmax(output_data)
+        confidence = output_data[0][result_index]
+        
+        if confidence < 0.5:
+            return "Lo siento, no estoy seguro de lo que se muestra en la imagen."
+        return labels[result_index]
+    except Exception as e:
+        return f"Error en la inferencia: {str(e)}"
+
+@bot.event
+async def on_ready():
+    print(f'Bot {bot.user} está listo y en funcionamiento.')
+
+@bot.command()
+async def analizar_imagen(ctx):
+    if ctx.message.attachments:
+        for attachment in ctx.message.attachments:
+            file_path = os.path.join(IMAGE_FOLDER, attachment.filename)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(attachment.url) as resp:
+                        if resp.status == 200:
+                            with open(file_path, 'wb') as f:
+                                f.write(await resp.read())
+                            resultado = get_class(MODEL_PATH, LABELS_PATH, file_path)
+                            await ctx.send(f'Imagen analizada: {attachment.filename}\nClasificación: {resultado}')
+                        else:
+                            await ctx.send('No se pudo descargar la imagen.')
+            except Exception as e:
+                await ctx.send(f'Ocurrió un error al procesar la imagen: {str(e)}')
+    else:
+        await ctx.send('No has adjuntado ninguna imagen.')
+
+if __name__ == "__main__":
+    bot.run(TOKEN)
